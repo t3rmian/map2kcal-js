@@ -25,10 +25,18 @@
     <div id="weather"></div>
     <div id="drag"></div>
     <div id="angles"></div>
+    <div id="summary">Summary:<br></div>
+    <iframe id="my_iframe" style="display:none;"></iframe>
+    <script>
+        function download(url) {
+            document.getElementById('my_iframe').src = url;
+        };
 
+    </script>
 
     <!--    <script src="https://maps.googleapis.com/maps/api/js?callback=initMap" async defer></script>-->
     <script src="xmlToJson.js"></script>
+    <script src="roadInfo.js"></script>
 
     <script>
         function isFileApiSupported() {
@@ -59,16 +67,16 @@
                         routeCoordinates = [];
                         routeAngles = [];
                         for (var i = 0; i < trkpts.length; i++) {
-                            var trkpt = {
-                                lat: parseFloat(trkpts[i]["@attributes"]["lat"]),
-                                lng: parseFloat(trkpts[i]["@attributes"]["lon"])
-                            }
+                            var trkpt = new Coordinate(parseFloat(trkpts[i]["@attributes"]["lat"]), parseFloat(trkpts[i]["@attributes"]["lon"]));
                             if (i === 0) {
-                                centerCoordinates = {
-                                    lat: trkpt.lat,
-                                    lng: trkpt.lng
-                                }
+                                centerCoordinates = new Coordinate(trkpt.lat, trkpt.lng);
+                                bbox.minLat = bbox.maxLat = trkpt.lat;
+                                bbox.minLng = bbox.maxLng = trkpt.lng;
                             } else {
+                                bbox.minLat = Math.min(bbox.minLat, trkpt.lat);
+                                bbox.maxLat = Math.max(bbox.maxLat, trkpt.lat);
+                                bbox.minLng = Math.min(bbox.minLng, trkpt.lng);
+                                bbox.maxLng = Math.max(bbox.maxLng, trkpt.lng);
                                 var p0 = {
                                         y: routeCoordinates[i - 1].lat,
                                         x: routeCoordinates[i - 1].lng
@@ -77,10 +85,7 @@
                                         y: trkpt.lat,
                                         x: trkpt.lng
                                     }
-                                var southAngle = (calculateAngleDeg(p0, p1) + 90) * (-1.0);
-                                while (southAngle < 0.0) {
-                                    southAngle += 360.0;
-                                }
+                                var southAngle = calculateAngle(p0, p1);
                                 var sectionAngle = {
                                     angle: southAngle,
                                     distance: calculateDistance(p0, p1)
@@ -101,6 +106,14 @@
                 alert("Failed to load file.");
             }
             return json;
+        }
+
+        function calculateAngle(p0, p1) {
+            var southAngle = (calculateAngleDeg(p0, p1) + 90) * (-1.0);
+            while (southAngle < 0.0) {
+                southAngle += 360.0;
+            }
+            return southAngle;
         }
 
         function loadAPI() {
@@ -162,32 +175,21 @@
                 map: map
             });
 
-            // Create a PathElevationRequest object using this array.
-            // Ask for 256 samples along that path.
-            // Initiate the path request.
             elevator.getElevationAlongPath({
                 'path': path,
                 'samples': 512
             }, plotElevation);
         }
 
-        // Takes an array of ElevationResult objects, draws the path on the map
-        // and plots the elevation profile on a Visualization API ColumnChart.
         function plotElevation(elevations, status) {
             var chartDiv = document.getElementById('elevation_chart');
             if (status !== 'OK') {
-                // Show the error code inside the chartDiv.
                 chartDiv.innerHTML = 'Cannot show elevation: request failed because ' +
                     status;
                 return;
             }
-            // Create a new chart in the elevation_chart DIV.
             var chart = new google.visualization.ColumnChart(chartDiv);
 
-            // Extract the data from which to populate the chart.
-            // Because the samples are equidistant, the 'Sample'
-            // column here does double duty as distance along the
-            // X axis.
             var data = new google.visualization.DataTable();
             data.addColumn('string', 'Sample');
             data.addColumn('number', 'Elevation');
@@ -195,7 +197,6 @@
                 data.addRow(['', elevations[i].elevation]);
             }
 
-            // Draw the chart using the data within its DIV.
             chart.draw(data, {
                 height: 150,
                 legend: 'none',
@@ -205,12 +206,13 @@
 
 
         var personSpeed = 30;
+        var bbox = {};
 
 
 
         //WEATHER
         function getWeather() {
-            return getJson("http://api.openweathermap.org/data/2.5/weather?lat=" + centerCoordinates.lat + "&lon=" + centerCoordinates.lng + "&APPID=95c13d1ccbcc0775dee571bc0f63e716",
+            return getResponse("http://api.openweathermap.org/data/2.5/weather?lat=" + centerCoordinates.lat + "&lon=" + centerCoordinates.lng + "&APPID=95c13d1ccbcc0775dee571bc0f63e716", "json",
                 function(error, data) {
                     if (error != null) {
                         alert("Error while retrieving weather data: " + err);
@@ -239,7 +241,7 @@
                                 totalSpeed = personSpeed - headwind;
                             dragForce = calculateDragForce(kphToMps(dragSpeed), coeff.Cd, coeff.A, airDensity);
 
-                            console.log("Wind angle: " + windAngle + " Heading angle: " + routeAngles[i].angle + " wind: " + windSpeed + " headwind: " + headwind + " crosswind: " + crosswind);
+                            //                        console.log("Wind angle: " + windAngle + " Heading angle: " + routeAngles[i].angle + " wind: " + windSpeed + " headwind: " + headwind + " crosswind: " + crosswind);
                             routeAngles[i].headwind = headwind;
                             routeAngles[i].crossWind = crosswind;
                             routeAngles[i].dragSpeed = dragSpeed;
@@ -252,6 +254,50 @@
                         }
                         totalHeadwind /= totalDistance;
                         anglesDiv.innerHTML = anglesDiv.innerHTML + "<br>Average headwind: " + totalHeadwind;
+
+
+                        //                        download("http://overpass.osm.rambler.ru/cgi/xapi_meta?*[bbox=" + bbox.minLng + "," + bbox.minLat + "," + bbox.maxLng + "," + bbox.maxLat + "]");
+                        getResponse("http://overpass.osm.rambler.ru/cgi/xapi?way[bbox=" + bbox.minLng + "," + bbox.minLat + "," + bbox.maxLng + "," + bbox.maxLat + "][highway=*]", "document",
+                            function(error, data) {
+                                if (error != null) {
+                                    alert("Error while retrieving weather data: " + err);
+                                } else {
+                                    console.log("http://overpass.osm.rambler.ru/cgi/xapi_meta?way[bbox=" + bbox.minLng + "," + bbox.minLat + "," + bbox.maxLng + "," + bbox.maxLat + "][highway=*]");
+                                    //console.log(data);
+                                    roadsInfoJson = xmlToJson(data);
+                                    console.log(roadsInfoJson);
+                                    console.log(routeCoordinates);
+                                    for (var i = 0; i < routeCoordinates.length; i++) {
+                                        routeCoordinates[i].loadOsmRoadInfo(roadsInfoJson);
+                                        console.log(routeCoordinates[i].highway);
+                                    }
+
+
+                                    var highways = {};
+                                    for (var i = 0; i < routeAngles.length; i++) {
+                                        if ((routeCoordinates[i].highway != null) && (routeCoordinates[i + 1].highway != null)) {
+                                            if (highways[routeCoordinates[i].highway] == null) {
+                                                highways[routeCoordinates[i].highway] = routeAngles[i].distance;
+                                            } else {
+                                                highways[routeCoordinates[i].highway] += routeAngles[i].distance;
+                                            }
+                                        } else {
+                                            if (highways["undefined"] == null) {
+                                                highways["undefined"] = routeAngles[i].distance;
+                                            } else {
+                                                highways["undefined"] += routeAngles[i].distance;
+                                            }
+                                        }
+                                    }
+                                    summaryDiv = document.getElementById('summary');
+                                    for (var highwayName in highways) {
+                                        if (highways.hasOwnProperty(highwayName)) {
+                                            var percentageDistance = highways[highwayName] * 100 / totalDistance;
+                                            summaryDiv.innerHTML = summaryDiv.innerHTML + highwayName + " " + percentageDistance + "%<br>";
+                                        }
+                                    }
+                                }
+                            });
                     }
                 });
         }
@@ -294,10 +340,10 @@
             return Math.sqrt(dx * dx + dy * dy);
         }
 
-        var getJson = function(url, callback) {
+        var getResponse = function(url, responseType, callback) {
             var xhr = new XMLHttpRequest();
             xhr.open("get", url, true);
-            xhr.responseType = "json";
+            xhr.responseType = responseType;
             xhr.onload = function() {
                 var status = xhr.status;
                 if (status == 200) {
