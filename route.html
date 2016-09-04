@@ -8,8 +8,7 @@
     <title>The HTML5 Herald</title>
     <meta name="description" content="Route information" />
     <meta name="author" content="Damian Terlecki" />
-    <link rel="stylesheet" type="text/css" href="main.css">
-    <script src="https://www.google.com/jsapi"></script>
+    <link rel="stylesheet" type="text/css" href="route.css">
 </head>
 
 <body>
@@ -18,10 +17,18 @@
     <input type="file" id="files" name="files" />
     <output id="list"></output>
 
-    <div id="map">
-
+    <div class="details">
+        <details id="details">
+            <div id="elevation_chart" class="chart"></div>
+            <div id="highway_chart" class="chart"></div>
+            <div id="surface_chart" class="chart"></div>
+            <div id="drag_force_chart" class="chart"></div>
+            <div id="headwind_chart" class="chart"></div>
+            <div id="crosswind_chart" class="chart"></div>
+        </details>
     </div>
-    <div id="elevation_chart"></div>
+    <div id="map">
+    </div>
     <div id="weather"></div>
     <div id="drag"></div>
     <div id="angles"></div>
@@ -37,7 +44,7 @@
     <!--    <script src="https://maps.googleapis.com/maps/api/js?callback=initMap" async defer></script>-->
     <script src="xmlToJson.js"></script>
     <script src="roadInfo.js"></script>
-
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
     <script>
         function isFileApiSupported() {
             return (window.File && window.FileReader && window.FileList && window.Blob);
@@ -128,8 +135,8 @@
         var centerCoordinates;
         var routeAngles;
 
-        google.load('visualization', '1', {
-            packages: ['columnchart']
+        google.charts.load('current', {
+            packages: ['corechart']
         });
 
         function initMap() {
@@ -182,6 +189,7 @@
         }
 
         function plotElevation(elevations, status) {
+            openDetails();
             var chartDiv = document.getElementById('elevation_chart');
             if (status !== 'OK') {
                 chartDiv.innerHTML = 'Cannot show elevation: request failed because ' +
@@ -198,10 +206,128 @@
             }
 
             chart.draw(data, {
+                width: 500,
                 height: 150,
                 legend: 'none',
                 titleY: 'Elevation (m)'
             });
+        }
+
+        function plotHighwayTypes(highways) {
+            var highwayNamesArray = [],
+                highwayPercentageArray = [];
+            highwayNamesArray.push("Highway");
+            highwayPercentageArray.push("Highway");
+            for (var highwayName in highways) {
+                highwayNamesArray.push(highwayName);
+                highwayPercentageArray.push(highways[highwayName]);
+            }
+            var data = google.visualization.arrayToDataTable([
+                highwayNamesArray, highwayPercentageArray
+            ]);
+
+            var view = new google.visualization.DataView(data);
+
+            var chart = new google.visualization.BarChart(document.getElementById("highway_chart"));
+            chart.draw(view, options_fullStacked);
+        }
+
+        var options_fullStacked = {
+            isStacked: 'percent',
+            height: 150,
+            width: 500,
+            legend: {
+                position: 'top',
+                maxLines: 3
+            },
+            hAxis: {
+                minValue: 0,
+                ticks: [0, .3, .6, .9, 1]
+            }
+        };
+
+        function plotSurfaceTypes(surfaces) {
+            var surfaceNamesArray = [],
+                surfacePercentageArray = [];
+            surfaceNamesArray.push("Surface");
+            surfacePercentageArray.push("Surface");
+            for (var surfaceName in surfaces) {
+                surfaceNamesArray.push(surfaceName);
+                surfacePercentageArray.push(surfaces[surfaceName]);
+            }
+            var data = google.visualization.arrayToDataTable([
+                surfaceNamesArray, surfacePercentageArray
+            ]);
+
+            var view = new google.visualization.DataView(data);
+
+
+
+            var chart = new google.visualization.BarChart(document.getElementById("surface_chart"));
+            chart.draw(view, options_fullStacked);
+        }
+
+        function plotDragForce(routeAngles) {
+            var chartDiv = document.getElementById('drag_force_chart');
+            var chart = new google.visualization.ColumnChart(chartDiv);
+
+            var data = new google.visualization.DataTable();
+            data.addColumn('string', 'Sample');
+            data.addColumn('number', 'Drag force');
+            for (var i = 0; i < routeAngles.length; i++) {
+                data.addRow(['', routeAngles[i].dragForce]);
+            }
+
+            chart.draw(data, {
+                width: 500,
+                height: 150,
+                legend: 'none',
+                titleY: 'Drag force (N)'
+            });
+        }
+
+        function plotHeadwind(routeAngles) {
+            var chartDiv = document.getElementById('headwind_chart');
+            var chart = new google.visualization.ColumnChart(chartDiv);
+
+            var data = new google.visualization.DataTable();
+            data.addColumn('string', 'Sample');
+            data.addColumn('number', 'Headwind');
+            for (var i = 0; i < routeAngles.length; i++) {
+                data.addRow(['', routeAngles[i].headwind]);
+            }
+
+            chart.draw(data, {
+                width: 500,
+                height: 150,
+                legend: 'none',
+                titleY: 'Headwind (km/h)'
+            });
+        }
+
+
+        function plotCrosswind(routeAngles) {
+            var chartDiv = document.getElementById('crosswind_chart');
+            var chart = new google.visualization.ColumnChart(chartDiv);
+
+            var data = new google.visualization.DataTable();
+            data.addColumn('string', 'Sample');
+            data.addColumn('number', 'Crosswind');
+            for (var i = 0; i < routeAngles.length; i++) {
+                data.addRow(['', routeAngles[i].crosswind]);
+            }
+
+            chart.draw(data, {
+                width: 500,
+                height: 150,
+                legend: 'none',
+                titleY: 'Crosswind (km/h)'
+            });
+        }
+
+        function openDetails() {
+            var details = document.getElementById("details");
+            details.setAttribute("open", "open");
         }
 
 
@@ -243,9 +369,11 @@
 
                             //                        console.log("Wind angle: " + windAngle + " Heading angle: " + routeAngles[i].angle + " wind: " + windSpeed + " headwind: " + headwind + " crosswind: " + crosswind);
                             routeAngles[i].headwind = headwind;
-                            routeAngles[i].crossWind = crosswind;
+                            routeAngles[i].crosswind = crosswind;
                             routeAngles[i].dragSpeed = dragSpeed;
                             routeAngles[i].totalSpeed = totalSpeed;
+                            routeAngles[i].dragForce = dragForce;
+
                             var anglesDiv = document.getElementById('angles');
                             anglesDiv.innerHTML = anglesDiv.innerHTML + "Angle: " + routeAngles[i].angle + " Distance: " + routeAngles[i].distance + " HW: " + headwind + " CW: " + crosswind + " DS: " + dragSpeed + " TS: " + totalSpeed + "dragF: " + dragForce + "<br>";
 
@@ -255,6 +383,9 @@
                         totalHeadwind /= totalDistance;
                         anglesDiv.innerHTML = anglesDiv.innerHTML + "<br>Average headwind: " + totalHeadwind;
 
+                        plotDragForce(routeAngles);
+                        plotHeadwind(routeAngles);
+                        plotCrosswind(routeAngles);
 
                         //                        download("http://overpass.osm.rambler.ru/cgi/xapi_meta?*[bbox=" + bbox.minLng + "," + bbox.minLat + "," + bbox.maxLng + "," + bbox.maxLat + "]");
                         getResponse("http://overpass.osm.rambler.ru/cgi/xapi?way[bbox=" + bbox.minLng + "," + bbox.minLat + "," + bbox.maxLng + "," + bbox.maxLat + "][highway=*]", "document",
@@ -293,9 +424,42 @@
                                     for (var highwayName in highways) {
                                         if (highways.hasOwnProperty(highwayName)) {
                                             var percentageDistance = highways[highwayName] * 100 / totalDistance;
+                                            highways[highwayName] = highways[highwayName] * 100 / totalDistance;
                                             summaryDiv.innerHTML = summaryDiv.innerHTML + highwayName + " " + percentageDistance + "%<br>";
                                         }
                                     }
+                                    summaryDiv.innerHTML = summaryDiv.innerHTML + "<br><br>";
+
+                                    var surfaces = {};
+                                    for (var i = 0; i < routeAngles.length; i++) {
+                                        if ((routeCoordinates[i].surface != null) && (routeCoordinates[i + 1].surface != null)) {
+                                            if (surfaces[routeCoordinates[i].surface] == null) {
+                                                surfaces[routeCoordinates[i].surface] = routeAngles[i].distance;
+                                            } else {
+                                                surfaces[routeCoordinates[i].surface] += routeAngles[i].distance;
+                                            }
+                                        } else {
+                                            if (surfaces["undefined"] == null) {
+                                                surfaces["undefined"] = routeAngles[i].distance;
+                                            } else {
+                                                surfaces["undefined"] += routeAngles[i].distance;
+                                            }
+                                        }
+                                    }
+                                    summaryDiv = document.getElementById('summary');
+                                    for (var surfaceName in surfaces) {
+                                        if (surfaces.hasOwnProperty(surfaceName)) {
+                                            var percentageDistance = surfaces[surfaceName] * 100 / totalDistance;
+                                            surfaces[surfaceName] = surfaces[surfaceName] * 100 / totalDistance;
+                                            summaryDiv.innerHTML = summaryDiv.innerHTML + surfaceName + " " + percentageDistance + "%<br>";
+                                        }
+                                    }
+
+
+
+
+                                    plotHighwayTypes(highways);
+                                    plotSurfaceTypes(surfaces);
                                 }
                             });
                     }

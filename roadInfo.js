@@ -23,7 +23,7 @@ function findNodeId(data, lat, lon) {
                     dLon: dLon,
                     id: nodes[i]["@attributes"]["id"]
                 }
-            } else if ((dLat < closest.dLat) && (dLon < closest.dLon)) {
+            } else if ((dLat <= closest.dLat) && (dLon <= closest.dLon)) {
                 closest.dLat = dLat;
                 closest.dLon = dLon;
                 closest.id = nodes[i]["@attributes"]["id"];
@@ -47,6 +47,7 @@ function parseNode(data, id, node) {
     } else {
         parseWay(way, id, node);
     }
+    associateSurfaceToHighway(node);
 }
 
 function parseWays(ways, id, node) {
@@ -90,5 +91,33 @@ function parseTags(tags, node) {
 function parseTag(tag, node) {
     if (tag["@attributes"]["k"] == "highway") {
         node.highway = tag["@attributes"]["v"];
+    } else if (tag["@attributes"]["k"] == "surface") {
+        node.surface = tag["@attributes"]["v"];
+    } else if (tag["@attributes"]["k"] == "tracktype") {
+        node.tracktype = tag["@attributes"]["v"];
+    }
+}
+
+function associateSurfaceToHighway(node) {
+    if (node.surface == null) {
+        if (node.highway == null || node.highway == "path") {
+            node.surface = "other";
+        } else if (node.highway == "track") {
+            if (node.tracktype == "grade1") {
+                node.surface = "solid"
+            } else if (node.tracktype == "grade2") {
+                node.surface = "mostly solid";
+            } else if (node.tracktype == "grade3") {
+                node.surface = "even mixture of hard and soft materials";
+            } else if (node.tracktype == "grade4") {
+                node.surface = "mostly soft";
+            } else if (node.tracktype == "grade5") {
+                node.surface = "soft";
+            } else {
+                node.surface = "other";
+            }
+        } else {
+            node.surface = "asphalt";
+        }
     }
 }
