@@ -1,6 +1,7 @@
 function Coordinate(lat, lng) {
     this.lat = lat;
     this.lng = lng;
+    this.slope = 0;
     this.highway = undefined;
 }
 
