@@ -103,8 +103,12 @@
         }
 
         function displayElevations(error, data) {
-            var chartDrawer = new ChartDrawer()
-            chartDrawer.plotElevation(routeLoader.route, "elevation_chart");
+            if (error != null) {
+                alert("Error while retrieving elevations data: " + error);
+            } else {
+                var chartDrawer = new ChartDrawer()
+                chartDrawer.plotElevation(routeLoader.route, "elevation_chart");
+            }
         }
 
         function displayWeather(error, data) {

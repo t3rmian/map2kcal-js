@@ -6,39 +6,124 @@ var RouteLoader = function (weatherOwmKey, googleMapJsKey = "") {
     };
 }
 
-RouteLoader.prototype.loadRouteData = function (weatherCallback, routeInfoCallback, elevationsCallback, mapDataCallback) {
-    mapDataCallback();
-    elevationsCallback();
-    getRouteInfo(this, weatherCallback, routeInfoCallback);
-}
-
 RouteLoader.prototype.createRouteFromGpx = function (e) {
-    var text, xml, json;
-
-    text = e.target.result;
-    xml = parseXml(text);
+    var text = e.target.result;
+    var xml = parseXml(text);
     if (xml) {
-        json = xmlToJson(xml);
-
+        var json = xmlToJson(xml);
         this.route = new Route(),
             trkpts = json.gpx.trk.trkseg.trkpt;
         for (var i = 0; i < trkpts.length; i++) {
             this.route.addCoordinate(parseFloat(trkpts[i]["@attributes"]["lat"]), parseFloat(trkpts[i]["@attributes"]["lon"]));
         }
         this.route.processCoordinates();
-        loadAPI(this);
+        this.loadApi();
         return this.route;
     } else {
         throw Error("Failed to parse xml file");
     }
 
-    function loadAPI(routeLoader) {
-        var script = document.createElement("script");
-        script.src = "https://maps.googleapis.com/maps/api/js?callback=initRouteData&key=" + routeLoader.api.googleMapJsKey;
-        script.type = "text/javascript";
-        document.getElementsByTagName("head")[0].appendChild(script);
+
+}
+
+RouteLoader.prototype.loadApi = function () {
+    var script = document.createElement("script");
+    script.src = "https://maps.googleapis.com/maps/api/js?callback=initRouteData&key=" + this.api.googleMapJsKey;
+    script.type = "text/javascript";
+    document.getElementsByTagName("head")[0].appendChild(script);
+}
+
+RouteLoader.prototype.loadRouteData = function (weatherCallback, routeInfoCallback, elevationsCallback, mapDataCallback) {
+    mapDataCallback();
+    this.loadElevations(elevationsCallback);
+    this.getRouteInfo(routeInfoCallback);
+    this.getWeather(weatherCallback);
+    console.log(this.route);
+    return this.route;
+}
+
+RouteLoader.prototype.loadElevations = function (elevationsCallback) {
+    var elevator = new google.maps.ElevationService;
+    var route = this.route;
+
+    elevator.getElevationAlongPath({
+        "path": route.coordinates,
+        "samples": 512
+    }, processElevations);
+
+    function processElevations(elevations, status) {
+        if (status !== "OK") {
+            elevationsCallback(status);
+        } else {
+            route.elevations = elevations;
+            route.processElevations();
+            elevationsCallback();
+        }
     }
 }
+
+RouteLoader.prototype.getRouteInfo = function (routeInfoCallback) {
+    var route = this.route;
+    return getResponse("http://overpass.osm.rambler.ru/cgi/xapi?way[bbox=" + route.bbox.minLng + "," + route.bbox.minLat + "," + route.bbox.maxLng + "," + route.bbox.maxLat +
+        "][highway=*]", "document",
+        function (error, data) {
+            if (error != null) {
+                routeInfoCallback(error);
+            } else {
+                try {
+                    roadsInfoJson = xmlToJson(data);
+                    route.processOsmData(roadsInfoJson);
+                    routeInfoCallback(null, data);
+                } catch (error) {
+                    routeInfoCallback(error, data);
+                }
+            }
+        });
+}
+
+RouteLoader.prototype.getWeather = function (weatherCallback) {
+    var routeLoader = this,
+        centerCoordinate = this.route.getCenterCoordinate();
+    return getResponse("http://api.openweathermap.org/data/2.5/weather?lat=" + centerCoordinate.lat + "&lon=" + centerCoordinate.lng + "&APPID=" + routeLoader.api.weatherOwmKey,
+        "json",
+        function (error, data) {
+            if (error != null) {
+                this.route.weather = new Weather();
+                weatherCallback(error, data);
+            } else {
+                try {
+                    var windSpeed = ktphToMps(data["wind"]["speed"]),
+                        windAngle = degToRad(data["wind"]["deg"]),
+                        temperature = data["main"]["temp"],
+                        pressure = data["main"]["pressure"] * 100,
+                        humidity = data["main"]["humidity"] / 100;
+                    routeLoader.route.weather = new Weather(pressure, temperature, humidity, windSpeed, windAngle);
+                    routeLoader.route.exerciser = new CityCyclist();
+                    routeLoader.route.processWeatherExerciser();
+                    weatherCallback(null, data);
+                } catch (error) {
+                    routeLoader.route.weather = new Weather();
+                    weatherCallback(error, data);
+                }
+
+            }
+        });
+}
+
+var getResponse = function (url, responseType, callback) {
+    var xhr = new XMLHttpRequest();
+    xhr.open("get", url, true);
+    xhr.responseType = responseType;
+    xhr.onload = function () {
+        var status = xhr.status;
+        if (status == 200) {
+            callback(null, xhr.response);
+        } else {
+            callback(status);
+        }
+    };
+    xhr.send();
+};
 
 var Route = function () {
     this.coordinates = [];
@@ -411,8 +496,6 @@ Exerciser.prototype.Pr = function (section, weather) {
 //Based on http://www.engineeringtoolbox.com/rolling-friction-resistance-d_1303.html; 9th Conference of the International Sports Engineering Association (ISEA), Cycling comfort on different road surfaces, Christin Hölzela*, Franz Höchtla, Veit Sennera; http://wiki.openstreetmap.org/wiki/Key:surface
 Exerciser.prototype.Crr = function (section) {
     var speedCorrection = 1 + this.vr / 20;
-    console.log(sectionCrr(section) * speedCorrection);
-    console.log("sdsa " + section.surface + " " + sectionCrr(section));
     return sectionCrr(section) * speedCorrection;
 
     function sectionCrr(section) {
@@ -531,7 +614,8 @@ var ChartDrawer = function (width = 500, height = 150) {
         width: this.width,
         height: this.height,
         legend: {
-            position: "bottom"
+            position: "bottom",
+            alignment: "start"
         },
         hAxis: {
             minValue: 0,
@@ -572,55 +656,40 @@ ChartDrawer.prototype.createCustomHtmlTooltip = function (name0, value0, unit0, 
 }
 
 ChartDrawer.prototype.plotElevation = function (route, elevationId) {
-    var elevator = new google.maps.ElevationService;
-    var chartDrawer = this;
+    var elevations = route.elevations;
+    var chartDiv = document.getElementById(elevationId);
+    var chart = new google.visualization.AreaChart(chartDiv);
+    var data = new google.visualization.DataTable();
+    data.addColumn("number", "Distance [km]");
+    data.addColumn("number", "Elevation [m]");
+    data.addColumn(this.tooltipColumn);
+    var distance = route.getDistance();
+    for (var i = 0; i < elevations.length; i++) {
+        var cumulativeKm = distance * i / (elevations.length - 1) / 1000;
+        data.addRow([cumulativeKm, elevations[i].elevation, this.createCustomHtmlTooltip("Elevation", elevations[i].elevation.toFixed(2), " m", "Distance", cumulativeKm.toFixed(3), " km")]);
+    }
 
-    elevator.getElevationAlongPath({
-        "path": route.coordinates,
-        "samples": 512
-    }, plotElevation);
+    chart.draw(data, {
+        title: "Route elevations",
+        width: this.width,
+        height: this.height,
+        legend: "none",
+        titleY: "Elevation [m]",
+        titleX: "Distance [km]",
+        tooltip: {
+            isHtml: true
+        },
+        curveType: "function"
+    });
+    google.visualization.events.addListener(chart, 'onmouseover', selectHandler);
 
+    route.elevations = elevations;
+    route.processElevations();
 
-
-
-    function plotElevation(elevations, status) {
-
-        var chartDiv = document.getElementById(elevationId);
-        if (status !== "OK") {
-            chartDiv.innerHTML = "Cannot show elevation: request failed because " +
-                status;
-            return;
-        }
-        var chart = new google.visualization.AreaChart(chartDiv);
-
-        var data = new google.visualization.DataTable();
-        data.addColumn("number", "Distance [km]");
-        data.addColumn("number", "Elevation [m]");
-        data.addColumn(chartDrawer.tooltipColumn);
-        var distance = route.getDistance();
-        for (var i = 0; i < elevations.length; i++) {
-            var cumulativeKm = distance * i / (elevations.length - 1) / 1000;
-            data.addRow([cumulativeKm, elevations[i].elevation, chartDrawer.createCustomHtmlTooltip("Elevation", elevations[i].elevation.toFixed(2), " m", "Distance", cumulativeKm.toFixed(3), " km")]);
-        }
-
-        chart.draw(data, {
-            title: "Route elevations",
-            width: chartDrawer.width,
-            height: chartDrawer.height,
-            legend: "none",
-            titleY: "Elevation [m]",
-            titleX: "Distance [km]",
-            tooltip: {
-                isHtml: true
-            },
-            curveType: "function"
-        });
-
-        route.elevations = elevations;
-        route.processElevations();
+    function selectHandler(e) {
+        console.log(e);
     }
 }
-
 
 ChartDrawer.prototype.plotHighways = function (route, highwaysId) {
     var highways = route.getHighways();
@@ -895,67 +964,3 @@ function selectionSortNamesValuesDesc(names, values) {
         names[minIdx] = temp;
     }
 }
-
-function getRouteInfo(routeLoader, weatherCallback, routeInfoCallback) {
-    var route = routeLoader.route;
-    return getResponse("http://overpass.osm.rambler.ru/cgi/xapi?way[bbox=" + route.bbox.minLng + "," + route.bbox.minLat + "," + route.bbox.maxLng + "," + route.bbox.maxLat + "][highway=*]", "document",
-        function (error, data) {
-            if (error != null) {
-                routeInfoCallback(error);
-            } else {
-                try {
-                    roadsInfoJson = xmlToJson(data);
-                    route.processOsmData(roadsInfoJson);
-                    routeInfoCallback(null, data);
-                } catch (error) {
-                    routeInfoCallback(error, data);
-                }
-            }
-            getWeather(routeLoader, weatherCallback);
-        });
-}
-
-function getWeather(routeLoader, weatherCallback) {
-    var route = routeLoader.route,
-        centerCoordinate = route.getCenterCoordinate();
-    return getResponse("http://api.openweathermap.org/data/2.5/weather?lat=" + centerCoordinate.lat + "&lon=" + centerCoordinate.lng + "&APPID=" + routeLoader.api.weatherOwmKey, "json",
-        function (error, data) {
-            if (error != null) {
-                route.weather = new Weather();
-                weatherCallback(error, data);
-            } else {
-                try {
-                    var windSpeed = ktphToMps(data["wind"]["speed"]),
-                        windAngle = degToRad(data["wind"]["deg"]),
-                        temperature = data["main"]["temp"],
-                        pressure = data["main"]["pressure"] * 100,
-                        humidity = data["main"]["humidity"] / 100;
-                    route.weather = new Weather(pressure, temperature, humidity, windSpeed, windAngle);
-                    route.exerciser = new CityCyclist();
-                    route.processWeatherExerciser();
-                    weatherCallback(null, data);
-                } catch (error) {
-                    route.weather = new Weather();
-                    weatherCallback(error, data);
-                }
-
-            }
-            console.log(route);
-        });
-}
-
-
-var getResponse = function (url, responseType, callback) {
-    var xhr = new XMLHttpRequest();
-    xhr.open("get", url, true);
-    xhr.responseType = responseType;
-    xhr.onload = function () {
-        var status = xhr.status;
-        if (status == 200) {
-            callback(null, xhr.response);
-        } else {
-            callback(status);
-        }
-    };
-    xhr.send();
-};
