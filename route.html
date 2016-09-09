@@ -47,7 +47,7 @@
         var routeLoader = new RouteLoader("95c13d1ccbcc0775dee571bc0f63e716", "");
 
         function initRouteData() {
-            routeLoader.loadRouteData(displayRouteInfo, displayWeather, displayElevations, displayMap);
+            routeLoader.loadRouteData(displayWeather, displayRouteInfo, displayElevations, displayMap);
         }
 
         function handleFileSelect(evt) {
@@ -116,6 +116,8 @@
                 var chartDrawer = new ChartDrawer();
                 chartDrawer.plotHeadwind(routeLoader.route, "headwind_chart");
                 chartDrawer.plotCrosswind(routeLoader.route, "crosswind_chart");
+                chartDrawer.plotKcal(routeLoader.route, "kcal_chart");
+                chartDrawer.plotE(routeLoader.route, "E_chart");
             }
         }
 
@@ -126,8 +128,6 @@
                 var chartDrawer = new ChartDrawer();
                 chartDrawer.plotHighways(routeLoader.route, "highways_chart");
                 chartDrawer.plotSurfaces(routeLoader.route, "surfaces_chart");
-                chartDrawer.plotKcal(routeLoader.route, "kcal_chart");
-                chartDrawer.plotE(routeLoader.route, "E_chart");
             }
         }
 

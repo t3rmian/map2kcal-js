@@ -6,10 +6,10 @@ var RouteLoader = function (weatherOwmKey, googleMapJsKey = "") {
     };
 }
 
-RouteLoader.prototype.loadRouteData = function (routeInfoCallback, weatherCallback, elevationsCallback, mapDataCallback) {
+RouteLoader.prototype.loadRouteData = function (weatherCallback, routeInfoCallback, elevationsCallback, mapDataCallback) {
     mapDataCallback();
     elevationsCallback();
-    getWeather(this, weatherCallback, routeInfoCallback);
+    getRouteInfo(this, weatherCallback, routeInfoCallback);
 }
 
 RouteLoader.prototype.createRouteFromGpx = function (e) {
@@ -147,16 +147,28 @@ Route.prototype.processWeatherExerciser = function () {
     }
 }
 
+Route.prototype.processOsmData = function (roadsInfoJson) {
+    for (var i = 0; i < this.coordinates.length; i++) {
+        this.coordinates[i].loadOsmRoadInfo(roadsInfoJson);
+    }
+    for (var i = 0; i < this.sections.length; i++) {
+        if ((this.coordinates[i].highway != null) && (this.coordinates[i + 1].highway != null)) {
+            this.sections[i].highway = this.coordinates[i].highway;
+            this.sections[i].surface = this.coordinates[i].surface;
+        }
+    }
+}
+
 Route.prototype.getHighways = function () {
     var highways = {};
     var sections = this.sections;
     var coordinates = this.coordinates;
     for (var i = 0; i < sections.length; i++) {
-        if ((coordinates[i].highway != null) && (coordinates[i + 1].highway != null)) {
-            if (highways[coordinates[i].highway] == null) {
-                highways[coordinates[i].highway] = sections[i].distance;
+        if (sections[i].highway != null) {
+            if (highways[sections[i].highway] == null) {
+                highways[sections[i].highway] = sections[i].distance;
             } else {
-                highways[coordinates[i].highway] += sections[i].distance;
+                highways[sections[i].highway] += sections[i].distance;
             }
         } else {
             if (highways["undefined"] == null) {
@@ -174,11 +186,11 @@ Route.prototype.getSurfaces = function () {
     var sections = this.sections;
     var coordinates = this.coordinates;
     for (var i = 0; i < sections.length; i++) {
-        if ((coordinates[i].highway != null) && (coordinates[i + 1].highway != null)) {
-            if (surfaces[coordinates[i].surface] == null) {
-                surfaces[coordinates[i].surface] = sections[i].distance;
+        if (sections[i].highway != null) {
+            if (surfaces[sections[i].surface] == null) {
+                surfaces[sections[i].surface] = sections[i].distance;
             } else {
-                surfaces[coordinates[i].surface] += sections[i].distance;
+                surfaces[sections[i].surface] += sections[i].distance;
             }
         } else {
             if (surfaces["undefined"] == null) {
@@ -315,15 +327,27 @@ Section.prototype.s = function () {
     return this.slope / this.distance;
 }
 
-https: //en.wikipedia.org/wiki/Standard_conditions_for_temperature_and_pressure
-    var Weather = function (p = 101325, T = 293.15, humidity = 0.5, windSpeed = 0, windAngle = 0, R = 8.314) {
-        this.p = p;
-        this.T = T;
-        this.phi = humidity;
-        this.R = R;
-        this.windSpeed = windSpeed;
-        this.windAngle = windAngle;
-    }
+//https: //en.wikipedia.org/wiki/Standard_conditions_for_temperature_and_pressure
+var Weather = function (p = 101325, T = 293.15, humidity = 0.5, windSpeed = 0, windAngle = 0, R = 8.314) {
+    this.p = p;
+    this.T = T;
+    this.phi = humidity;
+    this.R = R;
+    this.windSpeed = windSpeed;
+    this.windAngle = windAngle;
+}
+
+//e.g. north wind is from north to south
+Weather.prototype.getWindDirection = function () {
+    var directionIndex = Math.round((angle / (Math.PI / 8))) % 16;
+    directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    return directions[directionIndex]
+}
+
+//https://en.wikipedia.org/wiki/Beaufort_scale
+Weather.prototype.getBeaufortNumber = function () {
+    return Math.round(Math.pow(windSpeed / 0.836, 2 / 3));
+}
 
 //https://en.wikipedia.org/wiki/Density_of_air
 Weather.prototype.rho = function () {
@@ -380,8 +404,65 @@ Exerciser.prototype.Fd = function (section, weather) {
     var va = this.vr + section.headwind;
     return 0.5 * weather.rho() * va * va * this.Cd * this.A;
 }
-Exerciser.prototype.Pr = function (section, weather, Crr = 0.0045) {
-    return this.vr * this.m * weather.g(section.lat, section.slope) * Math.cos(Math.atan(section.s())) * Crr;
+Exerciser.prototype.Pr = function (section, weather) {
+    return this.vr * this.m * weather.g(section.lat, section.slope) * Math.cos(Math.atan(section.s())) * this.Crr(section);
+}
+
+//Based on http://www.engineeringtoolbox.com/rolling-friction-resistance-d_1303.html; 9th Conference of the International Sports Engineering Association (ISEA), Cycling comfort on different road surfaces, Christin Hölzela*, Franz Höchtla, Veit Sennera; http://wiki.openstreetmap.org/wiki/Key:surface
+Exerciser.prototype.Crr = function (section) {
+    var speedCorrection = 1 + this.vr / 20;
+    console.log(sectionCrr(section) * speedCorrection);
+    console.log("sdsa " + section.surface + " " + sectionCrr(section));
+    return sectionCrr(section) * speedCorrection;
+
+    function sectionCrr(section) {
+        switch (section.surface) {
+            case "wood":
+            case "tartan":
+            case "clay":
+            case "metal":
+                return 0.001;
+            case "concrete":
+                return 0.002;
+            case "paved":
+            case "paving_stones":
+            case "paving_stones:30":
+            case "concrete:lanes":
+            case "concrete:plates":
+                return 0.003;
+            case "asphalt":
+                return 0.004;
+            case "solid":
+            case "sett":
+            default:
+                return 0.0045;
+            case "mostly solid":
+            case "grass_paver":
+            case "fine_gravel":
+                return 0.005;
+            case "even mixture of hard and soft materials":
+                return 0.006;
+            case "mostly soft":
+            case "cobblestone":
+                return 0.007;
+            case "soft":
+            case "sand":
+            case "compacted":
+            case "pebblestone":
+                return 0.008;
+            case null:
+            case "unpaved":
+            case "other":
+            case "gravel":
+            case "earth":
+                return 0.009;
+            case "grass":
+            case "dirt":
+                return 0.01;
+            case "mud":
+                return 0.015;
+        }
+    }
 }
 Exerciser.prototype.Ps = function (section, weather) {
     return this.vr * this.m * weather.g(section.lat, section.slope) * Math.sin(Math.atan(section.s()));
@@ -417,6 +498,9 @@ CityCyclist.prototype.constructor = CityCyclist;
 function CityCyclist() {
     this.Cd = 1.15;
     this.A = 0.632;
+    this.eta = 0.8;
+    this.vr = kphToMps(20);
+    this.a = 0.5;
 };
 
 RacingCyclist.prototype = new Exerciser();
@@ -425,6 +509,9 @@ RacingCyclist.prototype.constructor = CityCyclist;
 function RacingCyclist() {
     this.Cd = 0.88;
     this.A = 0.32;
+    this.eta = 0.95;
+    this.vr = kphToMps(30);
+    this.a = 1.5;
 };
 
 Runner.prototype = new Exerciser();
@@ -809,13 +896,33 @@ function selectionSortNamesValuesDesc(names, values) {
     }
 }
 
-function getWeather(routeLoader, weatherCallback, routeInfoCallback) {
+function getRouteInfo(routeLoader, weatherCallback, routeInfoCallback) {
+    var route = routeLoader.route;
+    return getResponse("http://overpass.osm.rambler.ru/cgi/xapi?way[bbox=" + route.bbox.minLng + "," + route.bbox.minLat + "," + route.bbox.maxLng + "," + route.bbox.maxLat + "][highway=*]", "document",
+        function (error, data) {
+            if (error != null) {
+                routeInfoCallback(error);
+            } else {
+                try {
+                    roadsInfoJson = xmlToJson(data);
+                    route.processOsmData(roadsInfoJson);
+                    routeInfoCallback(null, data);
+                } catch (error) {
+                    routeInfoCallback(error, data);
+                }
+            }
+            getWeather(routeLoader, weatherCallback);
+        });
+}
+
+function getWeather(routeLoader, weatherCallback) {
     var route = routeLoader.route,
         centerCoordinate = route.getCenterCoordinate();
     return getResponse("http://api.openweathermap.org/data/2.5/weather?lat=" + centerCoordinate.lat + "&lon=" + centerCoordinate.lng + "&APPID=" + routeLoader.api.weatherOwmKey, "json",
         function (error, data) {
             if (error != null) {
-                weatherCallback(error);
+                route.weather = new Weather();
+                weatherCallback(error, data);
             } else {
                 try {
                     var windSpeed = ktphToMps(data["wind"]["speed"]),
@@ -832,30 +939,11 @@ function getWeather(routeLoader, weatherCallback, routeInfoCallback) {
                     weatherCallback(error, data);
                 }
 
-                getRouteInfo(route, routeInfoCallback);
             }
+            console.log(route);
         });
 }
 
-function getRouteInfo(route, routeInfoCallback) {
-    return getResponse("http://overpass.osm.rambler.ru/cgi/xapi?way[bbox=" + route.bbox.minLng + "," + route.bbox.minLat + "," + route.bbox.maxLng + "," + route.bbox.maxLat + "][highway=*]", "document",
-        function (error, data) {
-            if (error != null) {
-                routeInfoCallback(error);
-            } else {
-                try {
-                    roadsInfoJson = xmlToJson(data);
-                    var coordinates = route.coordinates;
-                    for (var i = 0; i < coordinates.length; i++) {
-                        coordinates[i].loadOsmRoadInfo(roadsInfoJson);
-                    }
-                    routeInfoCallback(null, data);
-                } catch (error) {
-                    routeInfoCallback(error, data);
-                }
-            }
-        });
-}
 
 var getResponse = function (url, responseType, callback) {
     var xhr = new XMLHttpRequest();
