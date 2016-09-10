@@ -45,6 +45,7 @@
         });
 
         var routeLoader = new RouteLoader("95c13d1ccbcc0775dee571bc0f63e716", "");
+        var chartDrawer = new ChartDrawer();
 
         function initRouteData() {
             routeLoader.loadRouteData(displayWeather, displayRouteInfo, displayElevations, displayMap);
@@ -61,7 +62,8 @@
                 var reader = new FileReader();
                 reader.onload = function(e) {
                     try {
-                        routeLoader.createRouteFromGpx(e);
+                        chartDrawer.route = routeLoader.createRouteFromGpx(e);
+                        routeLoader.loadApi();
                     } catch (error) {
                         alert(error);
                     }
@@ -80,11 +82,13 @@
 
         function displayMap() {
             openDetails();
-            var map = new google.maps.Map(document.getElementById("map"), {
-                zoom: 8,
-                center: routeLoader.route.getCenterCoordinate(),
+            var mapDiv = document.getElementById("map");
+            var map = new google.maps.Map(mapDiv, {
+                zoom: routeLoader.route.getGoogleMapZoom(mapDiv.offsetWidth, mapDiv.offsetHeight),
+                center: routeLoader.route.getMercatorCenterCoordinate(),
                 mapTypeId: "terrain"
             });
+            chartDrawer.gMap = map;
 
             var routePolyline = new google.maps.Polyline({
                 path: routeLoader.route.coordinates,
@@ -106,8 +110,7 @@
             if (error != null) {
                 alert("Error while retrieving elevations data: " + error);
             } else {
-                var chartDrawer = new ChartDrawer()
-                chartDrawer.plotElevation(routeLoader.route, "elevation_chart");
+                chartDrawer.plotElevation("elevation_chart");
             }
         }
 
@@ -117,11 +120,10 @@
             } else {
                 var weatherDiv = document.getElementById("weather");
                 weatherDiv.innerHTML = weatherDiv.innerHTML + JSON.stringify(data);
-                var chartDrawer = new ChartDrawer();
-                chartDrawer.plotHeadwind(routeLoader.route, "headwind_chart");
-                chartDrawer.plotCrosswind(routeLoader.route, "crosswind_chart");
-                chartDrawer.plotKcal(routeLoader.route, "kcal_chart");
-                chartDrawer.plotE(routeLoader.route, "E_chart");
+                chartDrawer.plotHeadwind("headwind_chart");
+                chartDrawer.plotCrosswind("crosswind_chart");
+                chartDrawer.plotKcal("kcal_chart");
+                chartDrawer.plotE("E_chart");
             }
         }
 
@@ -129,9 +131,8 @@
             if (error != null) {
                 alert("Error while retrieving route info data: " + error);
             } else {
-                var chartDrawer = new ChartDrawer();
-                chartDrawer.plotHighways(routeLoader.route, "highways_chart");
-                chartDrawer.plotSurfaces(routeLoader.route, "surfaces_chart");
+                chartDrawer.plotHighways("highways_chart");
+                chartDrawer.plotSurfaces("surfaces_chart");
             }
         }
 

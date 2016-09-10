@@ -3,6 +3,7 @@ function Coordinate(lat, lng) {
     this.lng = lng;
     this.slope = 0;
     this.highway = undefined;
+    this.surface = undefined;
 }
 
 Coordinate.prototype.loadOsmRoadInfo = function (data) {

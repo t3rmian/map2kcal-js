@@ -17,7 +17,6 @@ RouteLoader.prototype.createRouteFromGpx = function (e) {
             this.route.addCoordinate(parseFloat(trkpts[i]["@attributes"]["lat"]), parseFloat(trkpts[i]["@attributes"]["lon"]));
         }
         this.route.processCoordinates();
-        this.loadApi();
         return this.route;
     } else {
         throw Error("Failed to parse xml file");
@@ -175,7 +174,27 @@ Route.prototype.processCoordinates = function () {
 }
 
 Route.prototype.getCenterCoordinate = function () {
-    return new Coordinate((this.bbox.maxLat + this.bbox.minLat) / 2.0, (this.bbox.maxLng + this.bbox.minLng) / 2.0);
+    var top = latToMercatorY(this.bbox.maxLat);
+    var bottom = latToMercatorY(this.bbox.minLat);
+    var vCenter = gudermannian((top + bottom) / 2);
+    return new Coordinate(radToDeg(vCenter), (this.bbox.maxLng + this.bbox.minLng) / 2.0);
+}
+
+//http://mathworld.wolfram.com/MercatorProjection.html
+Route.prototype.getMercatorCenterCoordinate = function () {
+    var top = latToMercatorY(this.bbox.maxLat);
+    var bottom = latToMercatorY(this.bbox.minLat);
+    var vCenter = gudermannian((top + bottom) / 2);
+    return new Coordinate(radToDeg(vCenter), (this.bbox.maxLng + this.bbox.minLng) / 2.0);
+}
+
+function latToMercatorY(latDeg) {
+    var sinY = Math.sin(degToRad(latDeg));
+    return Math.log((1 + sinY) / (1 - sinY)) / 2;
+}
+
+function gudermannian(y) {
+    return Math.atan(Math.sinh(y));
 }
 
 Route.prototype.processElevations = function () {
@@ -194,6 +213,11 @@ Route.prototype.processElevations = function () {
 Route.prototype.getElevationIndex = function (sectionIndex) {
     var sectionToElevation = (this.elevations.length - 1) / this.sections.length;
     return Math.round(sectionToElevation * sectionIndex);
+}
+
+Route.prototype.getElevationCoordinate = function (elevationIndex) {
+    var elevationToCoordinate = (this.coordinates.length - 1) / this.elevations.length;
+    return Math.round(elevationToCoordinate * elevationIndex);
 }
 
 Route.prototype.processWeatherExerciser = function () {
@@ -302,6 +326,27 @@ Route.prototype.getSlope = function () {
         slope += this.sections[i].slope;
     }
     return slope;
+}
+
+//https://en.wikipedia.org/wiki/Mercator_projection
+Route.prototype.getGoogleMapZoom = function (mapWidth, mapHeight) {
+    var GMAP_BASE_DIM = {
+        height: 256,
+        width: 256
+    };
+    var ZOOM_MAX = 21;
+
+    var lngFraction = (this.bbox.maxLng - this.bbox.minLng) / 360;
+    var latFraction = (latToMercatorY(this.bbox.maxLat) - latToMercatorY(this.bbox.minLat)) / (2 * Math.PI);
+
+    var lngZoom = zoom(mapWidth, GMAP_BASE_DIM.width, lngFraction);
+    var latZoom = zoom(mapHeight, GMAP_BASE_DIM.height, latFraction);
+
+    return Math.min(latZoom, lngZoom, ZOOM_MAX);
+
+    function zoom(mapPx, worldPx, fraction) {
+        return Math.floor(Math.log(mapPx / worldPx / fraction) / Math.LN2);
+    }
 }
 
 var Section = function (p0, p1) {
@@ -606,7 +651,7 @@ function Runner() {
 };
 
 
-var ChartDrawer = function (width = 500, height = 150) {
+var ChartDrawer = function (width = 500, height = 150, route, gMap) {
     this.width = width;
     this.height = height;
     this.options_fullStacked = {
@@ -632,6 +677,8 @@ var ChartDrawer = function (width = 500, height = 150) {
             "html": true
         }
     };
+    this.gMap = gMap;
+    this.route = route;
 }
 
 ChartDrawer.prototype.createCustomHtmlTooltip = function (name0, value0, unit0, name1, value1, unit1) {
@@ -655,11 +702,13 @@ ChartDrawer.prototype.createCustomHtmlTooltip = function (name0, value0, unit0, 
     }
 }
 
-ChartDrawer.prototype.plotElevation = function (route, elevationId) {
-    var elevations = route.elevations;
-    var chartDiv = document.getElementById(elevationId);
-    var chart = new google.visualization.AreaChart(chartDiv);
-    var data = new google.visualization.DataTable();
+ChartDrawer.prototype.plotElevation = function (elevationId) {
+    var route = this.route,
+        gMap = this.gMap,
+        elevations = route.elevations,
+        chartDiv = document.getElementById(elevationId),
+        chart = new google.visualization.AreaChart(chartDiv),
+        data = new google.visualization.DataTable();
     data.addColumn("number", "Distance [km]");
     data.addColumn("number", "Elevation [m]");
     data.addColumn(this.tooltipColumn);
@@ -681,21 +730,39 @@ ChartDrawer.prototype.plotElevation = function (route, elevationId) {
         },
         curveType: "function"
     });
-    google.visualization.events.addListener(chart, 'onmouseover', selectHandler);
 
-    route.elevations = elevations;
-    route.processElevations();
+    if (gMap != null) {
+        var dot;
+        google.visualization.events.addListener(chart, 'onmouseover', mouseoverHandler);
+        google.visualization.events.addListener(chart, 'onmouseout', mouseoutHandler);
+    }
 
-    function selectHandler(e) {
-        console.log(e);
+    function mouseoverHandler(event) {
+        var coordinate = route.coordinates[route.getElevationCoordinate(event.row)];
+        dot = new google.maps.Polyline({
+            path: [coordinate, coordinate],
+            geodesic: true,
+            strokeColor: '#00FF00',
+            strokeOpacity: 1.0,
+            strokeWeight: 5
+        });
+        dot.setMap(gMap);
+    }
+
+    function mouseoutHandler(event) {
+        dot.setMap(null);
+        dot = undefined;
     }
 }
 
-ChartDrawer.prototype.plotHighways = function (route, highwaysId) {
-    var highways = route.getHighways();
-    var chartDiv = document.getElementById(highwaysId);
-    var chart = new google.visualization.BarChart(chartDiv);
-    var highwayNames = [],
+ChartDrawer.prototype.plotHighways = function (highwaysId) {
+    var route = this.route,
+        gMap = this.gMap,
+        highways = route.getHighways(),
+        chartDiv = document.getElementById(highwaysId),
+        chart = new google.visualization.BarChart(chartDiv),
+
+        highwayNames = [],
         highwayPercentages = [],
         highwayTooltips = [];
     for (var highwayName in highways) {
@@ -722,13 +789,53 @@ ChartDrawer.prototype.plotHighways = function (route, highwaysId) {
 
     this.options_fullStacked.title = "Highway types en route";
     chart.draw(view, this.options_fullStacked);
+
+    if (gMap != null) {
+        var lines;
+        google.visualization.events.addListener(chart, 'onmouseover', mouseoverHandler);
+        google.visualization.events.addListener(chart, 'onmouseout', mouseoutHandler);
+    }
+
+    function mouseoverHandler(event) {
+        lines = [];
+        var index = parseInt(event.column / 2);
+        var highwayName = highwayNames[index];
+        if (highwayName == "undefined") {
+            highwayName = null;
+        }
+        for (var i = 0; i < route.sections.length; i++) {
+            if (route.sections[i].highway == highwayName) {
+                var line = new google.maps.Polyline({
+                    path: [route.coordinates[i], route.coordinates[i + 1]],
+                    geodesic: true,
+                    strokeColor: '#00FF00',
+                    strokeOpacity: 1.0,
+                    strokeWeight: 5
+                });
+                line.setMap(gMap);
+                lines.push(line);
+            }
+        }
+
+    }
+
+    function mouseoutHandler(event) {
+        for (var i = 0; i < lines.length; i++) {
+            lines[i].setMap(null);
+        }
+        lines = undefined;
+    }
+
 }
 
-ChartDrawer.prototype.plotSurfaces = function (route, surfacesId) {
-    var surfaces = route.getSurfaces();
-    var chartDiv = document.getElementById(surfacesId);
-    var chart = new google.visualization.BarChart(chartDiv);
-    var surfaceNames = [],
+ChartDrawer.prototype.plotSurfaces = function (surfacesId) {
+    var route = this.route,
+        gMap = this.gMap,
+        surfaces = route.getSurfaces(),
+        chartDiv = document.getElementById(surfacesId),
+        chart = new google.visualization.BarChart(chartDiv),
+
+        surfaceNames = [],
         surfacePercentages = [],
         surfaceTooltips = [];
     for (var surfaceName in surfaces) {
@@ -755,14 +862,50 @@ ChartDrawer.prototype.plotSurfaces = function (route, surfacesId) {
     this.options_fullStacked.title = "Surface types en route";
     chart.draw(view, this.options_fullStacked);
 
+    if (gMap != null) {
+        var lines;
+        google.visualization.events.addListener(chart, 'onmouseover', mouseoverHandler);
+        google.visualization.events.addListener(chart, 'onmouseout', mouseoutHandler);
+    }
+
+    function mouseoverHandler(event) {
+        lines = [];
+        var index = parseInt(event.column / 2);
+        var surfaceName = surfaceNames[index];
+        if (surfaceName == "undefined") {
+            surfaceName = null;
+        }
+        for (var i = 0; i < route.sections.length; i++) {
+            if (route.sections[i].surface == surfaceName) {
+                var line = new google.maps.Polyline({
+                    path: [route.coordinates[i], route.coordinates[i + 1]],
+                    geodesic: true,
+                    strokeColor: '#00FF00',
+                    strokeOpacity: 1.0,
+                    strokeWeight: 5
+                });
+                line.setMap(gMap);
+                lines.push(line);
+            }
+        }
+
+    }
+
+    function mouseoutHandler(event) {
+        for (var i = 0; i < lines.length; i++) {
+            lines[i].setMap(null);
+        }
+        lines = undefined;
+    }
 
 }
 
-ChartDrawer.prototype.plotHeadwind = function (route, headwindId) {
-    var chartDiv = document.getElementById(headwindId);
-    var chart = new google.visualization.AreaChart(chartDiv);
-
-    var data = new google.visualization.DataTable();
+ChartDrawer.prototype.plotHeadwind = function (headwindId) {
+    var route = this.route,
+        gMap = this.gMap,
+        chartDiv = document.getElementById(headwindId),
+        chart = new google.visualization.AreaChart(chartDiv),
+        data = new google.visualization.DataTable();
     data.addColumn("number", "Distance [km]");
     data.addColumn("number", "Headwind (positive) [km/h]");
     data.addColumn(this.tooltipColumn);
@@ -793,14 +936,37 @@ ChartDrawer.prototype.plotHeadwind = function (route, headwindId) {
         curveType: "function",
         colors: ["red", "green"]
     });
+
+    if (gMap != null) {
+        var line;
+        google.visualization.events.addListener(chart, 'onmouseover', mouseoverHandler);
+        google.visualization.events.addListener(chart, 'onmouseout', mouseoutHandler);
+    }
+
+    function mouseoverHandler(event) {
+        line = new google.maps.Polyline({
+            path: [route.coordinates[event.row], route.coordinates[event.row + 1]],
+            geodesic: true,
+            strokeColor: '#00FF00',
+            strokeOpacity: 1.0,
+            strokeWeight: 5
+        });
+        line.setMap(gMap);
+    }
+
+    function mouseoutHandler(event) {
+        line.setMap(null);
+        line = undefined;
+    }
 }
 
 
-ChartDrawer.prototype.plotCrosswind = function (route, crosswindId) {
-    var chartDiv = document.getElementById(crosswindId);
-    var chart = new google.visualization.AreaChart(chartDiv);
-
-    var data = new google.visualization.DataTable();
+ChartDrawer.prototype.plotCrosswind = function (crosswindId) {
+    var route = this.route,
+        gMap = this.gMap,
+        chartDiv = document.getElementById(crosswindId),
+        chart = new google.visualization.AreaChart(chartDiv),
+        data = new google.visualization.DataTable();
     data.addColumn("number", "Distance [km]");
     data.addColumn("number", "Crosswind (from left) [km/h]");
     data.addColumn(this.tooltipColumn);
@@ -835,20 +1001,43 @@ ChartDrawer.prototype.plotCrosswind = function (route, crosswindId) {
         curveType: "function",
         colors: ["orange", "purple"]
     });
+
+    if (gMap != null) {
+        var line;
+        google.visualization.events.addListener(chart, 'onmouseover', mouseoverHandler);
+        google.visualization.events.addListener(chart, 'onmouseout', mouseoutHandler);
+    }
+
+    function mouseoverHandler(event) {
+        line = new google.maps.Polyline({
+            path: [route.coordinates[event.row], route.coordinates[event.row + 1]],
+            geodesic: true,
+            strokeColor: '#00FF00',
+            strokeOpacity: 1.0,
+            strokeWeight: 5
+        });
+        line.setMap(gMap);
+    }
+
+    function mouseoutHandler(event) {
+        line.setMap(null);
+        line = undefined;
+    }
 }
 
 
-ChartDrawer.prototype.plotKcal = function (route, kcalId) {
-    var chartDiv = document.getElementById(kcalId);
-    var chart = new google.visualization.AreaChart(chartDiv);
-
-    var data = new google.visualization.DataTable();
+ChartDrawer.prototype.plotKcal = function (kcalId) {
+    var route = this.route,
+        gMap = this.gMap,
+        chartDiv = document.getElementById(kcalId),
+        chart = new google.visualization.AreaChart(chartDiv),
+        data = new google.visualization.DataTable();
     data.addColumn("number", "Distance [km]");
     data.addColumn("number", "kcal");
     data.addColumn(this.tooltipColumn);
-    var rows = [];
-    var cumulativeDistanceKm = 0;
-    var cumulativeEnergyKcal = 0;
+    var rows = [],
+        cumulativeDistanceKm = 0,
+        cumulativeEnergyKcal = 0;
     rows.push([0, 0, this.createCustomHtmlTooltip("Energy", "0", " kcal", "Distance", "0", " km/h")]);
     for (var i = 0; i < route.sections.length; i++) {
         cumulativeDistanceKm += route.sections[i].distance / 1000;
@@ -871,22 +1060,51 @@ ChartDrawer.prototype.plotKcal = function (route, kcalId) {
     };
 
     chart.draw(data, options);
+
+    if (gMap != null) {
+        var subRoute;
+        google.visualization.events.addListener(chart, 'onmouseover', mouseoverHandler);
+        google.visualization.events.addListener(chart, 'onmouseout', mouseoutHandler);
+    }
+
+    function mouseoverHandler(event) {
+        var lines = [],
+            lastCoordinateIndex = event.row + 1;
+
+        for (var i = 0; i <= lastCoordinateIndex; i++) {
+            lines.push(route.coordinates[i]);
+        }
+        subRoute = new google.maps.Polyline({
+            path: lines,
+            geodesic: true,
+            strokeColor: '#00FF00',
+            strokeOpacity: 1.0,
+            strokeWeight: 5
+        });
+        subRoute.setMap(gMap);
+    }
+
+    function mouseoutHandler(event) {
+        subRoute.setMap(null);
+        subRoute = undefined;
+    }
 }
 
 
-ChartDrawer.prototype.plotE = function (route, PId) {
-    var chartDiv = document.getElementById(PId);
-    var chart = new google.visualization.BarChart(chartDiv);
+ChartDrawer.prototype.plotE = function (PId) {
+    var chartDiv = document.getElementById(PId),
+        chart = new google.visualization.BarChart(chartDiv),
 
-    var absoluteE = Math.abs(route.Ed) + Math.abs(route.Ea) + Math.abs(route.Es) + Math.abs(route.Er),
-        percEd = 100 * route.Ed / absoluteE,
-        percEa = 100 * route.Ea / absoluteE,
-        percEs = 100 * route.Es / absoluteE,
-        percEr = 100 * route.Er / absoluteE;
+        absoluteE = Math.abs(this.route.Ed) + Math.abs(this.route.Ea) + Math.abs(this.route.Es) + Math.abs(this.route.Er),
+        percEd = 100 * this.route.Ed / absoluteE,
+        percEa = 100 * this.route.Ea / absoluteE,
+        percEs = 100 * this.route.Es / absoluteE,
+        percEr = 100 * this.route.Er / absoluteE,
 
-    var unit = "%",
-        unitDescription = " of total absolute energy";
-    var data = google.visualization.arrayToDataTable([
+        unit = "%",
+        unitDescription = " of total absolute energy",
+
+        data = google.visualization.arrayToDataTable([
           ["Energy", "kcal", this.tooltipColumn],
           ["Air drag", percEd, this.createCustomHtmlTooltip("Air drag", percEd.toFixed(2), unit, unitDescription)],
           ["Rolling resistance", percEr, this.createCustomHtmlTooltip("Rolling resistance", percEr.toFixed(2), unit, unitDescription)],
@@ -947,15 +1165,14 @@ function kelvinToCelsius(T) {
 }
 
 function selectionSortNamesValuesDesc(names, values) {
-    var minIdx, temp;
     for (var i = 0; i < values.length; i++) {
-        minIdx = i;
+        var minIdx = i;
         for (var j = i + 1; j < values.length; j++) {
             if (values[j] > values[minIdx]) {
                 minIdx = j;
             }
         }
-        temp = values[i];
+        var temp = values[i];
         values[i] = values[minIdx];
         values[minIdx] = temp;
 
