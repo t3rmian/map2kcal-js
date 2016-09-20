@@ -1,0 +1,191 @@
+<!--
+Copyright 2016 Damian Terlecki
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>map2kcal sample usage</title>
+    <meta name="description" content="Sample 'map2kcal.js' usage" />
+    <meta name="author" content="Damian Terlecki" />
+    <link rel="stylesheet" type="text/css" href="sample.css">
+    <script src="map2kcal-1.0.0.js"></script>
+    <script src="map2kcal.charts-1.0.0.js"></script>
+</head>
+
+<body>
+    <div>
+        Load .gpx file
+        <input type="file" id="files" name="files" />
+    </div>
+    <div id="map">
+        Register your own API keys, current ones are only for this sample
+        <br>
+        <br>
+        <br> Load .gpx file (currently based on <a href="//openrouteservice.org">OpenRouteService.org</a> .gpx files)
+        <br>
+        <br>
+        <br> Based on .gpx coordinates 'map2kcal' downloads data (elevations from Google, surfaces and highway types from OpenStreetMap, weather from OpenWeatherMap) and based on set activity calculates many different values (sections, distance, different energy values, headwind, crosswind, etc.).
+    </div>
+    <div id="errors"></div>
+    <div id="summary"></div>
+    <div class="chart-container">
+        <div class="chart" id="chart1"></div>
+        <div class="chart" id="chart2"></div>
+        <div class="chart" id="chart3"></div>
+        <div class="chart" id="chart4"></div>
+        <div class="chart" id="chart5"></div>
+        <div class="chart" id="chart6"></div>
+        <div class="chart" id="chart7"></div>
+    </div>
+    <br>
+    <br>
+    <div id="ps"></div>
+    <br>
+    <br>
+    <div id="footer">
+        <a href="//T3r1jj.gitlab.io/applications/MapToKcal.html">Link to an application based on 'map2kcal'</a>
+        <br>
+        <br>
+    </div>
+
+    <script>
+        var openWeatherMapKey = "9ba2f65a704fa28dae36a884eb7e260a",
+            googleMapJsKey = "",
+            routeLoader = new RouteLoader(openWeatherMapKey, googleMapJsKey),
+            chartDrawer = new ChartDrawer(750, 250);
+
+        routeLoader.onLoadingFinished = function() {
+            document.getElementById("summary").innerHTML = "Route loader object has been printed to the console. Besides route object it contains callback functions and information about which modula has not been loaded (if its loaded then routeLoader.loadedModules.moduleName contains true else it contains error description.<br><br>Following types of exercise can be set for route: Exercise(abstract), Cycling, RaceCycling, CityCycling, Running, Walking.";
+            console.log(routeLoader);
+            console.log(chartDrawer);
+
+            displayMap();
+            chartDrawer.plotElevation("chart1");
+            chartDrawer.plotHighways("chart2");
+            chartDrawer.plotSurfaces("chart3");
+            chartDrawer.plotHeadwind("chart4");
+            chartDrawer.plotCrosswind("chart5");
+            chartDrawer.plotKcal("chart6");
+            chartDrawer.plotE("chart7");
+            document.getElementById("ps").innerHTML = "Callbacks with error parameter can also be set in RouteLoader before loading api, for each data type, instead of single callback at the end.";
+
+            printErrors();
+        }
+
+        document.getElementById("files").addEventListener("change", handleFileSelect, false);
+        loadAttributions();
+        loadLicenses();
+
+
+        function handleFileSelect(evt) {
+            if (!isFileApiSupported) {
+                alert("The File APIs are not fully supported by your browser")
+                return null;
+            }
+
+            var file = evt.target.files[0];
+            if (file) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        var route = routeLoader.createRouteFromGpx(e);
+                        chartDrawer.route = route;
+                        route.exercise = new Cycling(); //Assign exercise before api load
+                        routeLoader.loadApi(); //Loads api which initializes data download and process, an exercise can be changed after that but then route.processWeatherExercise() must be called
+                    } catch (error) {
+                        alert("Not a .gpx file (" + error + ")");
+                    }
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function isFileApiSupported() {
+            return (window.File && window.FileReader && window.FileList && window.Blob);
+        }
+
+
+        function displayMap() {
+            var mapDiv = document.getElementById("map");
+            mapDiv.innerHTML = "";
+            var map = new google.maps.Map(mapDiv, {
+                zoom: routeLoader.route.getGoogleMapZoom(mapDiv.offsetWidth, mapDiv.offsetHeight),
+                center: routeLoader.route.getMercatorCenterCoordinate(),
+                mapTypeId: "terrain"
+            });
+            chartDrawer.gMap = map; //Set map for ChartDrawer which will bind onmouseover events between charts and map
+
+            var routePolyline = new google.maps.Polyline({
+                path: routeLoader.route.coordinates,
+                geodesic: true,
+                strokeColor: "#0000FF",
+                strokeOpacity: 1.0,
+                strokeWeight: 2,
+                zIndex: 100
+            });
+
+            routePolyline.setMap(map);
+        }
+
+        function printErrors() {
+            var errorsDiv = document.getElementById("errors");
+            errorsDiv.innerHTML = "";
+            for (key in routeLoader.loadedModules) {
+                if (routeLoader.loadedModules.hasOwnProperty(key)) {
+                    if (routeLoader.loadedModules[key] != true) {
+                        errorsDiv.innerHTML = key + ": " + errorsDiv.innerHTML + routeLoader.loadedModules[key] + "<br>";
+                    }
+                }
+            }
+        }
+
+        function loadAttributions() {
+            var div = document.getElementById("footer");
+            var attributions = routeLoader.getAttributions();
+            var output = 'Attributions: ';
+            for (key in attributions) {
+                if (attributions.hasOwnProperty(key)) {
+                    output += '<a href="' + attributions[key][1] + '">' + attributions[key][0] + '</a>' + ", ";
+                }
+            }
+            div.innerHTML = div.innerHTML + output.slice(0, -2);
+        }
+
+        function loadLicenses() {
+            var div = document.getElementById("footer");
+            var licenses = routeLoader.getLicenses();
+            var output = 'Licenses:\r\n\r\n\r\n';
+            for (key in licenses) {
+                if (licenses.hasOwnProperty(key)) {
+                    output += key + '\r\n' + licenses[key] + '\r\n\r\n\r\n';
+                }
+            }
+
+            var element = document.createElement('a');
+            element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(output));
+            element.setAttribute('download', "Licenses");
+            element.innerHTML = element.innerHTML + '<br>' + 'Licenses';
+            div.appendChild(element);
+        }
+
+    </script>
+
+</body>
+
+</html>
