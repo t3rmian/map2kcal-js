@@ -23,6 +23,10 @@ limitations under the License.
     text-align: center;
 }
 
+#map> div {
+    top: 0px;
+}
+
 .chart-container {
     text-align: center;
 }

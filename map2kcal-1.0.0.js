@@ -37,6 +37,7 @@ var RouteLoader = function (weatherOwmKey, googleMapJsKey = "") {
 
 RouteLoader.prototype.getLicenses = function () {
     return {
+        GoogleChart: "Read more at: https://developers.google.com/chart/terms",
         GoogleMaps: "Read more at: https://developers.google.com/maps/terms",
         OpenStreetMap: "The data is made available under ODbL. http://opendatacommons.org/licenses/odbl./",
         OpenWeatherMap: "OpenWeatherMap data is released under the terms and conditions of CC-BY-SA. Read more at: https://openweathermap.org/terms and https://openweathermap.desk.com/customer/portal/questions/14410510-question-about-licensing?t=535697",
@@ -46,6 +47,10 @@ RouteLoader.prototype.getLicenses = function () {
 }
 RouteLoader.prototype.getAttributions = function () {
     return {
+        GoogleChart: [
+            "Chart tools ©2015 Google",
+            "//developers.google.com/chart/"
+        ],
         GoogleMaps: [
             "Map and elevations data ©2015 Google",
             "//www.google.pl/maps"
