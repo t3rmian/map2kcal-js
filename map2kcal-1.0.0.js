@@ -118,12 +118,13 @@ RouteLoader.prototype.createRouteFromGpx = function (e) {
 
 RouteLoader.prototype.loadApi = function () {
     if (this.apiLoaded) {
-        initRouteData();
+        this.loadRouteData();
         return;
     }
     var script = document.createElement("script");
     script.src = "https://maps.googleapis.com/maps/api/js?key=" + this.api.googleMapJsKey;
     script.type = "text/javascript";
+    var routeLoader = this;
     script.onload = function () {
         routeLoader.loadRouteData();
     };
