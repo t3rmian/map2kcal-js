@@ -22,14 +22,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-  GoogleChart: Read more at: https://developers.google.com/chart/terms
+  GoogleChart: Read more at: https://developers.google.com/chart/terms  
   GoogleMaps: Read more at: https://developers.google.com/maps/terms  
   OpenStreetMap: The data is made available under ODbL. http://opendatacommons.org/licenses/odbl./  
   OpenWeatherMap: OpenWeatherMap data is released under the terms and conditions of CC-BY-SA. Read more at: https://openweathermap.org/terms and https://openweathermap.desk.com/customer/portal/questions/14410510-question-about-licensing?t=535697"  
   OverpassAPI: No formal policy yet. Read more at https://wiki.openstreetmap.org/wiki/Talk:Overpass_API#Licensing  
   
 ## Attributions
-[Chart tools ©2015 Google](www.developers.google.com/chart/)
+[Chart tools ©2015 Google](www.developers.google.com/chart/)  
 [Map and elevations data ©2015 Google](www.google.pl/maps)  
 [Route highway/surface types data © OpenStreetMap contributors](www.openstreetmap.org/copyright)  
 [Weather data OpenWeatherMap.org](www.openweathermap.org/terms)  
